@@ -9,7 +9,7 @@
   jsonData =
     if cfg.json != null
     then builtins.fromJSON (builtins.readFile cfg.json)
-    else {};
+    else throw "Attempted to access default values from JSON, but programs.linuwowo.json is not set.";
 in {
   options.programs.linuwowo = {
     enable = lib.mkEnableOption "linuwowo";
@@ -22,14 +22,14 @@ in {
 
     disableUmip = lib.mkOption {
       type = lib.types.bool;
-      default = jsonData.disableUmip or false;
+      default = jsonData.disableUmip;
       description = "Disables UMIP CPU feature.";
     };
 
     cpuidFaultEmulation = {
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = jsonData.cpuidFaultEmulation or false;
+        default = jsonData.cpuidFaultEmulation;
         description = "Build and load the AMD CPUID fault emulation kernel module.";
       };
 
@@ -49,6 +49,13 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.json != null;
+        message = "programs.linuwowo.json must be set when programs.linuwowo.enable is true.";
+      }
+    ];
+
     boot.kernelParams = lib.mkIf cfg.disableUmip ["clearcpuid=umip"];
 
     boot.extraModulePackages = lib.mkIf cfg.cpuidFaultEmulation.enable [
