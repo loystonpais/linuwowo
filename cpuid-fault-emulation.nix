@@ -14,11 +14,14 @@ stdenv.mkDerivation {
     "format"
   ];
 
+  makeFlags = [
+    "KERNEL=${kernel.modDirVersion}"
+  ];
+
   # Patch the hardcoded host paths to point into the Nix store
   postPatch = ''
     substituteInPlace Makefile \
-      --replace '/lib/modules/$(KERNEL)/build' '${kernel.dev}/lib/modules/${kernel.modDirVersion}/build' \
-      --replace '$(shell uname -r)' '${kernel.modDirVersion}'
+      --replace "/lib/modules/" "${kernel.dev}/lib/modules/"
   '';
 
   installPhase = ''
