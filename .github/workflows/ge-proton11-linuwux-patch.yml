@@ -1,0 +1,137 @@
+name: Build GE-Proton 11 (Patched)
+
+on: workflow_dispatch
+
+concurrency:
+  group: ge-proton-build
+  cancel-in-progress: true
+
+env:
+  GE_PROTON_REPO: https://github.com/GloriousEggroll/proton-ge-custom.git
+  GE_PROTON_COMMIT: fd07a035fadfbe989aef887cb999d0ef236c50d0
+  BUILD_NAME: GE-Proton11-DenUwUvo
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup disk space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_codeql: true
+          remove_docker_images: true
+          remove_swap: true
+          remove_packages: |
+            azure-cli google-cloud-cli google-chrome-stable firefox microsoft-edge-stable
+            postgresql* mysql* php* temurin-* *llvm* clang* mono-devel powershell dotnet-sdk-*
+          remove_folders: |
+            /usr/share/swift /usr/share/miniconda /usr/local/lib/node_modules
+            /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia*
+            /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle /usr/share/az*
+            /usr/local/.ghcup
+
+      - name: Prepare host
+        run: sudo apt update && sudo apt-get install -y ccache fontforge-nox
+
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.ccache
+          key: ccache-proton-${{ github.run_id }}
+          restore-keys: |
+            ccache-proton
+
+      - name: Checkout this repo (for the patch file)
+        uses: actions/checkout@v6
+        with:
+          path: denuvowo-nix
+
+      - name: Clone GE-Proton at pinned commit
+        run: |
+          git clone "$GE_PROTON_REPO" proton-ge-custom
+          cd proton-ge-custom
+          git checkout "$GE_PROTON_COMMIT"
+
+      - name: Init submodules and apply GE patches
+        working-directory: proton-ge-custom
+        run: |
+          git submodule update --init --filter=tree:0 --recursive
+          ./patches/protonprep-valve-staging.sh || true
+          # strip binaries at compile time to save space in the runner
+          patch -Np1 -i ./.github/patches/0001-build-strip-binaries-early.patch
+
+      - name: Apply LinUwUx patch
+        working-directory: proton-ge-custom
+        run: |
+          # The patch uses "proton-ge-custom/..." paths, strip one level
+          patch -Np1 -i "$GITHUB_WORKSPACE/denuvowo-nix/LinUwUx.patch"
+
+      - name: Configure
+        working-directory: proton-ge-custom
+        run: |
+          mkdir -p build
+          cd build
+          ../configure.sh \
+            --build-name="${{ env.BUILD_NAME }}" \
+            --container-engine=docker
+
+      - name: Build
+        working-directory: proton-ge-custom/build
+        run: |
+          make -j$(nproc) redist
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.BUILD_NAME }}.tar.gz
+          path: proton-ge-custom/build/${{ env.BUILD_NAME }}.tar.gz
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.BUILD_NAME }}.sha512sum
+          path: proton-ge-custom/build/${{ env.BUILD_NAME }}.sha512sum
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download tarball
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.BUILD_NAME }}.tar.gz
+
+      - name: Download checksum
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.BUILD_NAME }}.sha512sum
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BUILD_NAME="${{ env.BUILD_NAME }}"
+          gh release create "$BUILD_NAME" \
+            --repo "${{ github.server_url }}/${{ github.repository }}" \
+            --title "$BUILD_NAME" \
+            --notes "GE-Proton 11 build with LinUwUx patch applied.
+
+          Based on [proton-ge-custom@\`${GE_PROTON_COMMIT:0:12}\`](https://github.com/GloriousEggroll/proton-ge-custom/commit/$GE_PROTON_COMMIT)" \
+            "$BUILD_NAME.tar.gz" \
+            "$BUILD_NAME.sha512sum"
