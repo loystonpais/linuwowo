@@ -130,7 +130,7 @@ jobs:
           gh release create "$BUILD_NAME" \
             --repo "${{ github.server_url }}/${{ github.repository }}" \
             --title "$BUILD_NAME" \
-            --notes "GE-Proton 11 build with LinUwUx patch applied.
+            --notes "GE-Proton11-1 build with LinUwUx patch applied.
 
           Based on [proton-ge-custom@\`${GE_PROTON_COMMIT:0:12}\`](https://github.com/GloriousEggroll/proton-ge-custom/commit/$GE_PROTON_COMMIT)" \
             "$BUILD_NAME.tar.gz" \
