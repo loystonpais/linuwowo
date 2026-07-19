@@ -1,4 +1,4 @@
-name: Build GE-Proton 11 - LinUwUx.patch
+name: Build GE-Proton11-1 - LinUwUx.patch
 
 on: workflow_dispatch
 
@@ -9,7 +9,7 @@ concurrency:
 env:
   GE_PROTON_REPO: https://github.com/GloriousEggroll/proton-ge-custom.git
   GE_PROTON_COMMIT: fd07a035fadfbe989aef887cb999d0ef236c50d0
-  BUILD_NAME: GE-Proton11-DenUwUvo
+  BUILD_NAME: GE-Proton11-1-LinUwUx-patch
 
 jobs:
   build:
@@ -50,7 +50,7 @@ jobs:
       - name: Checkout this repo (for the patch file)
         uses: actions/checkout@v6
         with:
-          path: denuvowo-nix
+          path: linuwowo
 
       - name: Clone GE-Proton at pinned commit
         run: |
@@ -70,7 +70,7 @@ jobs:
         working-directory: proton-ge-custom
         run: |
           # The patch uses "proton-ge-custom/..." paths, strip one level
-          patch -Np1 -i "$GITHUB_WORKSPACE/denuvowo-nix/LinUwUx.patch"
+          patch -Np1 -i "$GITHUB_WORKSPACE/linuwowo/LinUwUx.patch"
 
       - name: Configure
         working-directory: proton-ge-custom
