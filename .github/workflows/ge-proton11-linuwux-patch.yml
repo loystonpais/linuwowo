@@ -1,4 +1,4 @@
-name: Build GE-Proton 11 (Patched)
+name: Build GE-Proton 11 - LinUwUx.patch
 
 on: workflow_dispatch
 
