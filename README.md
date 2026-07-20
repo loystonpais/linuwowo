@@ -47,8 +47,26 @@ In your `configuration.nix` (make sure `linuwowo.json` is in the same directory)
   programs.linuwowo = {
     enable = true;
     json = ./linuwowo.json;
+    
+    # Optional: Automatically start the cpuid-fault-emulation service at boot.
+    # If false, you can start/stop the service manually.
+    # cpuidFaultEmulation.autoLoad = true; 
   };
 }
+```
+
+## CPUID Fault Emulation Service
+
+A systemd service named `cpuid-fault-emulation` is created when CPUID fault emulation is enabled. It manages loading and unloading of the module.
+
+If `cpuidFaultEmulation.autoLoad` is `false` (default), you can still start/stop the service manually:
+
+```bash
+# Unload KVM and load CPUID fault emulation
+sudo systemctl start cpuid-fault-emulation
+
+# Unload CPUID fault emulation and restore KVM
+sudo systemctl stop cpuid-fault-emulation
 ```
 
 ---
