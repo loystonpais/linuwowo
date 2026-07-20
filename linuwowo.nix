@@ -43,7 +43,7 @@ in {
       autoLoad = lib.mkOption {
         type = lib.types.bool;
         default = false;
-        description = "Auto-load the module at boot via boot.kernelModules.";
+        description = "Auto-load the module at boot via the cpuid-fault-emulation systemd service.";
       };
     };
   };
@@ -62,9 +62,33 @@ in {
       cfg.cpuidFaultEmulation.package
     ];
 
-    boot.kernelModules =
-      lib.mkIf
-      (cfg.cpuidFaultEmulation.enable && cfg.cpuidFaultEmulation.autoLoad)
-      ["cpuid_fault_emulation"];
+    systemd.services.cpuid-fault-emulation = lib.mkIf cfg.cpuidFaultEmulation.enable {
+      description = "CPUID Fault Emulation Service";
+      wantedBy = lib.mkIf cfg.cpuidFaultEmulation.autoLoad ["multi-user.target"];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = pkgs.writeShellScript "cpuid-fault-emulation-start" ''
+          export PATH=${lib.makeBinPath (with pkgs; [kmod gnugrep])}:$PATH
+          if lsmod | grep -q "^kvm_amd"; then
+            modprobe -r kvm_amd
+          elif lsmod | grep -q "^kvm_intel"; then
+            modprobe -r kvm_intel
+          fi
+          modprobe -r kvm || true
+          modprobe cpuid_fault_emulation
+        '';
+        ExecStop = pkgs.writeShellScript "cpuid-fault-emulation-stop" ''
+          export PATH=${lib.makeBinPath (with pkgs; [kmod gnugrep])}:$PATH
+          modprobe -r cpuid_fault_emulation
+          modprobe kvm || true
+          if grep -q "AuthenticAMD" /proc/cpuinfo; then
+            modprobe kvm_amd || true
+          elif grep -q "GenuineIntel" /proc/cpuinfo; then
+            modprobe kvm_intel || true
+          fi
+        '';
+      };
+    };
   };
 }
