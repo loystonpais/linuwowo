@@ -27,12 +27,44 @@
       {
         pkgs,
         system,
-      }: {
-        detect = pkgs.writers.writePython3Bin "detect" {doCheck = false;} (builtins.readFile ./detect.py);
-        cpuid-fault-emulation = pkgs.callPackage ./cpuid-fault-emulation.nix {
-          kernel = pkgs.linux;
-        };
-      }
+      }: let
+        releases = builtins.fromJSON (builtins.readFile ./gh-releases.json);
+        allAssets = builtins.concatMap (release: release.assets) releases;
+        protonAssets =
+          builtins.filter (
+            asset:
+              (lib.hasPrefix "GE-Proton" asset.name) && (lib.hasSuffix ".tar.gz" asset.name)
+          )
+          allAssets;
+        extractSha256 = digest: let
+          hasPrefix = lib.hasPrefix "sha256:" digest;
+        in
+          if hasPrefix
+          then lib.removePrefix "sha256:" digest
+          else digest;
+        protonPackages = builtins.listToAttrs (map (asset: let
+            pkgName = lib.removeSuffix ".tar.gz" asset.name;
+            tarball = pkgs.fetchurl {
+              name = asset.name;
+              url = asset.browser_download_url;
+              sha256 = extractSha256 asset.digest;
+            };
+          in {
+            name = pkgName;
+            value = pkgs.runCommand pkgName {} ''
+              mkdir -p $out
+              tar -xf ${tarball} --strip-components=1 -C $out
+            '';
+          })
+          protonAssets);
+      in
+        {
+          detect = pkgs.writers.writePython3Bin "detect" {doCheck = false;} (builtins.readFile ./detect.py);
+          cpuid-fault-emulation = pkgs.callPackage ./cpuid-fault-emulation.nix {
+            kernel = pkgs.linux;
+          };
+        }
+        // protonPackages
     );
 
     devShells = forEachSupportedSystem (

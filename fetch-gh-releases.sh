@@ -1,0 +1,1 @@
+curl -s https://api.github.com/repos/loystonpais/linuwowo/releases 1> gh-releases.json
