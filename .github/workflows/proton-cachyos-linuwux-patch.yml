@@ -1,0 +1,168 @@
+name: Build Proton-CachyOS - LinUwUx Patch / linuwux.py
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Proton-CachyOS tag/version to build (e.g. cachyos-10.0-sunset-slr)'
+        required: true
+        type: string
+
+concurrency:
+  group: proton-cachyos-build-${{ github.event.inputs.version_tag }}
+  cancel-in-progress: true
+
+env:
+  CACHYOS_REPO: https://github.com/CachyOS/proton-cachyos.git
+  BUILD_TAG: ${{ github.event.inputs.version_tag }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup disk space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_codeql: true
+          remove_docker_images: true
+          remove_swap: true
+          remove_packages: |
+            azure-cli google-cloud-cli google-chrome-stable firefox microsoft-edge-stable
+            postgresql* mysql* php* temurin-* *llvm* clang* mono-devel powershell dotnet-sdk-*
+          remove_folders: |
+            usr/share/swift usr/share/miniconda usr/local/lib/node_modules
+            usr/local/share/chromium usr/local/share/powershell usr/local/julia*
+            usr/local/aws-cli usr/local/aws-sam-cli usr/share/gradle usr/share/az*
+            usr/local/.ghcup
+
+      - name: Prepare host
+        run: sudo apt update && sudo apt-get install -y ccache fontforge-nox python3
+
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.ccache
+          key: ccache-proton-cachyos-${{ github.event.inputs.version_tag }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-proton-cachyos-${{ github.event.inputs.version_tag }}
+            ccache-proton-cachyos
+
+      - name: Checkout this repo (for patches & scripts)
+        uses: actions/checkout@v6
+        with:
+          path: linuwowo
+
+      - name: Clone Proton-CachyOS at tag
+        run: |
+          git clone --depth 1 --branch "$BUILD_TAG" "$CACHYOS_REPO" proton-cachyos
+
+      - name: Init submodules and apply CachyOS prep patches
+        working-directory: proton-cachyos
+        run: |
+          git submodule update --init --filter=tree:0 --recursive
+          if [ -f "./patches/protonprep-valve-staging.sh" ]; then
+            ./patches/protonprep-valve-staging.sh || true
+          fi
+          if [ -f "./.github/patches/0001-build-strip-binaries-early.patch" ]; then
+            patch -Np1 -i ./.github/patches/0001-build-strip-binaries-early.patch || true
+          fi
+
+      - name: Apply LinUwUx patch (with Python fallback)
+        working-directory: proton-cachyos
+        run: |
+          echo "Attempting to apply LinUwUx.patch..."
+          if patch -Np1 --dry-run -i "$GITHUB_WORKSPACE/linuwowo/LinUwUx.patch" > /dev/null 2>&1; then
+            echo "Patch dry-run succeeded. Applying LinUwUx.patch..."
+            patch -Np1 -i "$GITHUB_WORKSPACE/linuwowo/LinUwUx.patch"
+            BUILD_NAME="Proton-${{ env.BUILD_TAG }}-LinUwUx-patch"
+            PATCH_METHOD="LinUwUx.patch"
+          else
+            echo "LinUwUx.patch failed dry-run or caused hunk failure. Falling back to linuwux.py..."
+            if python3 "$GITHUB_WORKSPACE/linuwowo/linuwux.py" .; then
+              BUILD_NAME="Proton-${{ env.BUILD_TAG }}-linuwux-py"
+              PATCH_METHOD="linuwux.py"
+            else
+              echo "::error::Both LinUwUx.patch and linuwux.py failed to apply patches."
+              exit 1
+            fi
+          fi
+          echo "BUILD_NAME=$BUILD_NAME" >> $GITHUB_ENV
+          echo "PATCH_METHOD=$PATCH_METHOD" >> $GITHUB_ENV
+
+      - name: Configure
+        working-directory: proton-cachyos
+        run: |
+          mkdir -p build
+          cd build
+          ../configure.sh \
+            --build-name="${{ env.BUILD_NAME }}" \
+            --container-engine=docker
+
+      - name: Build
+        working-directory: proton-cachyos/build
+        run: |
+          make -j$(nproc) redist
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.BUILD_NAME }}.tar.gz
+          path: proton-cachyos/build/${{ env.BUILD_NAME }}.tar.gz
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.BUILD_NAME }}.sha512sum
+          path: proton-cachyos/build/${{ env.BUILD_NAME }}.sha512sum
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download tarball
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.BUILD_NAME }}.tar.gz
+
+      - name: Download checksum
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ env.BUILD_NAME }}.sha512sum
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BUILD_NAME="${{ env.BUILD_NAME }}"
+          if [[ "$BUILD_NAME" == *-linuwux-py ]]; then
+            NOTE_PATCH="Patched using \`linuwux.py\` (fallback applied after \`LinUwUx.patch\` failed/hunk failure)."
+          else
+            NOTE_PATCH="Patched using \`LinUwUx.patch\`."
+          fi
+
+          gh release create "$BUILD_NAME" \
+            --repo "${{ github.server_url }}/${{ github.repository }}" \
+            --title "$BUILD_NAME" \
+            --notes "Proton-CachyOS build ($BUILD_TAG).
+
+          $NOTE_PATCH
+
+          Based on [proton-cachyos@\`${BUILD_TAG}\`](https://github.com/CachyOS/proton-cachyos/releases/tag/$BUILD_TAG)" \
+            "$BUILD_NAME.tar.gz" \
+            "$BUILD_NAME.sha512sum"
